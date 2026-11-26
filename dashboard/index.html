@@ -1,0 +1,336 @@
+<title>Farm EB-3 Prospects</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=Public+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a working prospect ledger. Filter rail on top, one dense row per farm, details unfold in place. */
+:root {
+  --bg: #f4f6f2; --surface: #ffffff; --sunk: #e9ede6; --line: #d5dcd1;
+  --fg: #1b231e; --muted: #5b675f; --accent: #2d6a3e; --accent-fg: #ffffff;
+  --wheat: #9a6b12; --wheat-bg: #f6ecd3; --done: #2d6a3e; --done-bg: #e1efe3; --warn: #a3471f;
+  --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --body: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #111512; --surface: #182019; --sunk: #1f2921; --line: #2c3a2f;
+  --fg: #e3e9e2; --muted: #9aa89d; --accent: #74c387; --accent-fg: #0d1a10;
+  --wheat: #e2b55a; --wheat-bg: #33291a; --done: #74c387; --done-bg: #1d3323; --warn: #f08a5d; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #111512; --surface: #182019; --sunk: #1f2921; --line: #2c3a2f;
+  --fg: #e3e9e2; --muted: #9aa89d; --accent: #74c387; --accent-fg: #0d1a10;
+  --wheat: #e2b55a; --wheat-bg: #33291a; --done: #74c387; --done-bg: #1d3323; --warn: #f08a5d; color-scheme: dark }
+* { box-sizing: border-box }
+body { background: var(--bg); color: var(--fg); font: 15px/1.5 var(--body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 20px 48px }
+.wrap { max-width: 1280px; margin: 0 auto; display: grid; gap: 16px }
+h1 { font: 800 clamp(1.5rem, 3vw, 2.1rem)/1.1 var(--display); margin: 0; letter-spacing: -0.01em; text-wrap: balance }
+.sub { color: var(--muted); margin: 4px 0 0; max-width: 70ch }
+.stats { display: flex; flex-wrap: wrap; gap: 8px 28px; font-variant-numeric: tabular-nums }
+.stat b { display: block; font: 700 1.5rem/1.1 var(--display) }
+.stat span { font-size: .78rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted) }
+.stat.done b { color: var(--done) }
+.filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; background: var(--surface);
+  border: 1px solid var(--line); border-radius: 10px; padding: 12px; position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5 }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg) }
+.filters .search { grid-column: span 2 }
+label.f { display: grid; gap: 2px; font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); min-width: 0 }
+input, select, textarea { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; width: 100%; min-width: 0 }
+input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+.toggles { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: end; grid-column: 1 / -1; font-size: .85rem }
+.toggles label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer }
+.toggles input { width: auto }
+.notice { font-size: .88rem; padding: 8px 12px; border-radius: 8px; background: var(--wheat-bg); color: var(--fg) }
+.count { font-size: .85rem; color: var(--muted) }
+.list { display: grid; gap: 6px }
+.row { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; display: grid;
+  grid-template-columns: 44px minmax(0, 2.2fr) minmax(0, 2fr) minmax(0, 1.3fr) 40px; gap: 12px; padding: 12px; align-items: start }
+.row.is-done { background: var(--done-bg); border-color: color-mix(in srgb, var(--done) 35%, var(--line)) }
+.tick { width: 34px; height: 34px; border-radius: 8px; border: 2px solid var(--line); background: var(--bg); cursor: pointer; display: grid; place-items: center; padding: 0 }
+.tick svg { width: 20px; height: 20px; stroke: var(--accent-fg); stroke-width: 3; fill: none; opacity: 0 }
+.tick[aria-pressed="true"] { background: var(--done); border-color: var(--done) }
+.tick[aria-pressed="true"] svg { opacity: 1 }
+.tick:disabled { cursor: not-allowed; opacity: .5 }
+.name { font: 700 1.02rem/1.25 var(--display); margin: 0; overflow-wrap: anywhere }
+.meta { color: var(--muted); font-size: .85rem }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px }
+.chip { font-size: .72rem; padding: 2px 7px; border-radius: 999px; background: var(--sunk); color: var(--fg); white-space: nowrap; font-variant-numeric: tabular-nums }
+.chip.a { background: var(--wheat-bg); color: var(--wheat); font-weight: 600 }
+.chip.yr { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent) }
+.contact { display: grid; gap: 1px; font-size: .88rem; min-width: 0 }
+.contact .who { font-weight: 600 }
+.contact .role { color: var(--muted); font-size: .8rem }
+.line { display: flex; align-items: center; gap: 6px; min-width: 0 }
+.line .val { font-family: var(--mono); font-size: .82rem; overflow-wrap: anywhere; user-select: all; min-width: 0 }
+.copy { border: 1px solid var(--line); background: transparent; color: var(--muted); border-radius: 5px; font-size: .7rem; padding: 1px 6px; cursor: pointer; flex: none }
+.copy:hover { color: var(--fg); border-color: var(--muted) }
+.web { font-size: .88rem; min-width: 0; display: grid; gap: 2px }
+.web a { color: var(--accent); overflow-wrap: anywhere; text-decoration: none; font-weight: 500 }
+.web a:hover { text-decoration: underline }
+.src { font-size: .72rem; color: var(--muted) }
+.more-btn { border: 1px solid var(--line); background: transparent; color: var(--fg); border-radius: 8px; width: 34px; height: 34px; cursor: pointer; font-size: 1.1rem }
+.detail { grid-column: 2 / -1; border-top: 1px dashed var(--line); padding-top: 10px; display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 16px }
+.detail p { margin: 0 0 8px; max-width: 72ch }
+.detail h3 { font: 700 .75rem/1.2 var(--display); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 6px }
+.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 12px; font-size: .86rem }
+.kv dt { color: var(--muted) } .kv dd { margin: 0; overflow-wrap: anywhere }
+.clist { display: grid; gap: 8px; margin-bottom: 10px }
+.status-line { font-size: .8rem; color: var(--done); margin-top: 4px }
+.load { justify-self: center; border: 1px solid var(--line); background: var(--surface); color: var(--fg); padding: 9px 18px; border-radius: 8px; cursor: pointer; font-weight: 600 }
+.empty { padding: 32px; text-align: center; color: var(--muted); background: var(--surface); border: 1px dashed var(--line); border-radius: 10px }
+footer { color: var(--muted); font-size: .78rem; max-width: 90ch }
+@media (max-width: 860px) {
+  .row { grid-template-columns: 40px minmax(0, 1fr) 36px }
+  .row .contact, .row .web { grid-column: 2 / 3 }
+  .row .more-btn { grid-row: 1; grid-column: 3 }
+  .detail { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) }
+  .filters { position: static }
+  .filters .search { grid-column: 1 / -1 }
+}
+@media (prefers-reduced-motion: no-preference) { .row { transition: background-color .2s } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Farm EB-3 Prospects</h1>
+    <p class="sub">US farms that have filed PERM green-card certifications (the EB-3 route) or hired H-2A workers, from US Department of Labor OFLC disclosure data FY2024–FY2026, with contacts from the filings and websites from Google Places.</p>
+  </header>
+  <div class="stats" id="stats" aria-live="polite"></div>
+  <section class="filters" aria-label="Filters">
+    <label class="f search">Search<input id="q" type="search" placeholder="Farm, city, contact, crop…"></label>
+    <label class="f">State<select id="state"><option value="">All states</option></select></label>
+    <label class="f">Sector<select id="sector"><option value="">All sectors</option></select></label>
+    <label class="f">Evidence<select id="tier"><option value="">All farms</option><option value="A">Filed PERM (EB-3)</option><option value="B">H-2A only</option></select></label>
+    <label class="f">Status<select id="status"><option value="">Any</option><option value="todo">Not contacted</option><option value="done">Contacted</option></select></label>
+    <label class="f">Sort<select id="sort"><option value="score">Best prospects</option><option value="perm">Most PERM filings</option><option value="h2a">Most H-2A workers</option><option value="name">Name A–Z</option><option value="state">State</option></select></label>
+    <div class="toggles">
+      <label><input type="checkbox" id="hasEmail"> Has email</label>
+      <label><input type="checkbox" id="hasWeb"> Has website</label>
+      <label><input type="checkbox" id="hrOnly"> HR / owner contact</label>
+      <label><input type="checkbox" id="yrOnly"> Year-round sectors</label>
+    </div>
+  </section>
+  <div class="notice" id="notice" hidden></div>
+  <div class="count" id="count"></div>
+  <div class="list" id="list"><div class="empty">Loading farms…</div></div>
+  <button class="load" id="loadMore" hidden>Show 50 more</button>
+  <footer>Contacts are the employer points of contact listed on public DOL filings. "Website" comes from Google Places, the filing itself, or the contact's email domain (marked). Ticks and notes are shared with everyone who can open this page.</footer>
+</div>
+
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const PAGE = 50;
+  let farms = [], view = [], shown = PAGE, outreach = new Map(), db = null, user = null, me = null;
+  const open = new Set(), queue = new Map(), names = new Map();
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const safeUrl = (u) => (/^https:\/\//i.test(u || "") ? u : "");
+  const HR = /hr|human|personnel|people|recruit|talent|owner|president|ceo|manager|director|partner|member|principal|general/i;
+  const isDone = (id) => !!outreach.get(id)?.contacted;
+  const fmt = (n) => Number(n || 0).toLocaleString("en-US");
+
+  function setNotice(text) { const n = $("#notice"); n.textContent = text || ""; n.hidden = !text; }
+
+  function fillSelect(id, values) {
+    const sel = $(id);
+    for (const [v, label] of values) { const o = document.createElement("option"); o.value = v; o.textContent = label; sel.append(o); }
+  }
+
+  function apply() {
+    const q = $("#q").value.trim().toLowerCase(), st = $("#state").value, sec = $("#sector").value, tier = $("#tier").value,
+      status = $("#status").value, sort = $("#sort").value;
+    view = farms.filter((f) => {
+      if (st && f.state !== st) return false;
+      if (sec && f.sector !== sec) return false;
+      if (tier && f.tier !== tier) return false;
+      if (status === "done" && !isDone(f.id)) return false;
+      if (status === "todo" && isDone(f.id)) return false;
+      if ($("#hasEmail").checked && !f.contacts.length) return false;
+      if ($("#hasWeb").checked && !f.website) return false;
+      if ($("#yrOnly").checked && !f.yearRound) return false;
+      if ($("#hrOnly").checked && !f.contacts.some((c) => HR.test(c.title))) return false;
+      if (q && !f._text.includes(q)) return false;
+      return true;
+    });
+    const by = { score: (a, b) => b.score - a.score, perm: (a, b) => b.perm - a.perm || b.score - a.score,
+      h2a: (a, b) => b.h2aWorkers - a.h2aWorkers, name: (a, b) => a.name.localeCompare(b.name),
+      state: (a, b) => a.state.localeCompare(b.state) || b.score - a.score }[sort];
+    view.sort(by);
+    shown = PAGE;
+    render();
+  }
+
+  function stats() {
+    const done = farms.filter((f) => isDone(f.id)).length;
+    const items = [["Farms", fmt(farms.length)], ["Filed PERM (EB-3)", fmt(farms.filter((f) => f.tier === "A").length)],
+      ["With email contact", fmt(farms.filter((f) => f.contacts.length).length)], ["With website", fmt(farms.filter((f) => f.website).length)],
+      ["Contacted", fmt(done), "done"]];
+    $("#stats").innerHTML = items.map(([l, v, c]) => `<div class="stat ${c || ""}"><b>${v}</b><span>${l}</span></div>`).join("");
+  }
+
+  const tickSvg = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+
+  function contactHtml(c) {
+    if (!c) return '<div class="contact"><span class="role">No contact on file</span></div>';
+    return `<div class="contact"><span class="who">${esc(c.name || "Contact")}</span>${c.title ? `<span class="role">${esc(c.title)}</span>` : ""}
+      ${c.email ? `<span class="line"><span class="val">${esc(c.email)}</span><button class="copy" data-copy="${esc(c.email)}" type="button">Copy</button></span>` : ""}
+      ${c.phone ? `<span class="line"><span class="val">${esc(c.phone)}</span><button class="copy" data-copy="${esc(c.phone)}" type="button">Copy</button></span>` : ""}</div>`;
+  }
+
+  function rowHtml(f) {
+    const done = isDone(f.id), o = outreach.get(f.id) || {};
+    const web = safeUrl(f.website);
+    const chips = [f.tier === "A" ? `<span class="chip a">PERM ×${fmt(f.perm)}</span>` : `<span class="chip">H-2A only</span>`,
+      f.h2aWorkers ? `<span class="chip">${fmt(f.h2aWorkers)} H-2A workers</span>` : "",
+      f.yearRound ? `<span class="chip yr">Year-round sector</span>` : "",
+      f.employees ? `<span class="chip">~${fmt(f.employees)} staff</span>` : ""].join("");
+    const g = f.google;
+    let html = `<article class="row${done ? " is-done" : ""}" data-id="${esc(f.id)}">
+      <button class="tick" type="button" aria-pressed="${done}" aria-label="Mark ${esc(f.name)} as contacted" ${db ? "" : "disabled"}>${tickSvg}</button>
+      <div><h2 class="name">${esc(f.name)}</h2><div class="meta">${esc(f.city)}, ${esc(f.state)} · ${esc(f.sector || "Agriculture")}</div><div class="chips">${chips}</div>
+        ${done ? `<div class="status-line">Contacted${o.at ? " " + esc(new Date(o.at).toLocaleDateString()) : ""}</div>` : ""}</div>
+      ${contactHtml(f.contacts[0])}
+      <div class="web">${web ? `<a href="${esc(web)}" target="_blank" rel="noopener">${esc(web.replace(/^https:\/\/(www\.)?/, ""))}</a><span class="src">via ${esc(f.websiteSource)}</span>` : '<span class="src">No website found</span>'}
+        ${f.phone ? `<span class="line"><span class="val">${esc(f.phone)}</span><button class="copy" data-copy="${esc(f.phone)}" type="button">Copy</button></span>` : ""}
+        ${g && g.rating ? `<span class="src">★ ${esc(g.rating)} · ${fmt(g.userRatingCount)} Google reviews</span>` : ""}</div>
+      <button class="more-btn" type="button" aria-expanded="${open.has(f.id)}" aria-label="Details for ${esc(f.name)}">${open.has(f.id) ? "−" : "+"}</button>`;
+    if (open.has(f.id)) html += detailHtml(f, o);
+    return html + "</article>";
+  }
+
+  function detailHtml(f, o) {
+    const g = f.google, maps = safeUrl(g && g.maps);
+    const by = o.by ? (names.get(o.by) || "") : "";
+    return `<div class="detail"><div><h3>About</h3><p>${esc(f.summary)}</p>
+      ${f.jobs.length ? `<h3>Roles filed</h3><p>${f.jobs.map(esc).join(" · ")}</p>` : ""}
+      <h3>Outreach note</h3><textarea id="note-${esc(f.id)}" data-note="${esc(f.id)}" rows="3" placeholder="${db ? "Who you spoke to, next step…" : "Sign in to add notes"}" ${db ? "" : "disabled"}>${esc(o.note || "")}</textarea>
+      ${o.contacted ? `<div class="status-line">Marked contacted${by ? " by " + esc(by) : ""}${o.at ? " on " + esc(new Date(o.at).toLocaleString()) : ""}</div>` : ""}</div>
+      <div><h3>All contacts</h3><div class="clist">${f.contacts.map(contactHtml).join("") || '<span class="src">None on file</span>'}</div>
+      <dl class="kv"><dt>Address</dt><dd>${esc([f.address, f.city, f.state, f.zip].filter(Boolean).join(", "))}</dd>
+        ${f.dba ? `<dt>Trades as</dt><dd>${esc(f.dba)}</dd>` : ""}
+        <dt>NAICS</dt><dd>${esc(f.naics)} ${esc(f.sector)}</dd>
+        ${f.founded ? `<dt>Founded</dt><dd>${esc(f.founded)}</dd>` : ""}
+        ${f.otherStates.length ? `<dt>Also hires in</dt><dd>${esc(f.otherStates.join(", "))}</dd>` : ""}
+        ${f.lawFirm ? `<dt>Immigration counsel</dt><dd>${esc(f.lawFirm)}</dd>` : ""}
+        <dt>Last DOL filing</dt><dd>${esc(f.lastFiling)}</dd>
+        ${g ? `<dt>Google listing</dt><dd>${esc(g.name)}${g.type ? " · " + esc(g.type) : ""}${g.status && g.status !== "OPERATIONAL" ? " · " + esc(g.status.toLowerCase().replace(/_/g, " ")) : ""}${maps ? ` · <a href="${esc(maps)}" target="_blank" rel="noopener">Map</a>` : ""}</dd>` : ""}
+        ${g && g.phone && g.phone !== f.phone ? `<dt>Google phone</dt><dd>${esc(g.phone)}</dd>` : ""}
+      </dl></div></div>`;
+  }
+
+  function render() {
+    const list = $("#list");
+    const slice = view.slice(0, shown);
+    list.innerHTML = slice.length ? slice.map(rowHtml).join("") : '<div class="empty">No farms match these filters. Clear a filter or search to see more.</div>';
+    $("#count").textContent = `Showing ${fmt(slice.length)} of ${fmt(view.length)} matching farms`;
+    $("#loadMore").hidden = shown >= view.length;
+    stats();
+    resolveNames();
+  }
+
+  function rerenderRow(id) {
+    const el = document.querySelector(`.row[data-id="${CSS.escape(id)}"]`);
+    const f = farms.find((x) => x.id === id);
+    if (!el || !f) return;
+    const active = document.activeElement && el.contains(document.activeElement) && document.activeElement.tagName === "TEXTAREA";
+    if (active) return; // don't clobber a note being typed
+    el.outerHTML = rowHtml(f);
+  }
+
+  async function resolveNames() {
+    if (!user || !user.profiles) return;
+    const ids = [...new Set(view.slice(0, shown).filter((f) => open.has(f.id)).map((f) => outreach.get(f.id)?.by).filter((x) => x && !names.has(x)))];
+    if (!ids.length) return;
+    try {
+      const ps = await user.profiles(ids);
+      ids.forEach((id) => names.set(id, (ps[id] && ps[id].name) || "a teammate"));
+      view.slice(0, shown).filter((f) => open.has(f.id)).forEach((f) => rerenderRow(f.id));
+    } catch (e) { /* names are optional */ }
+  }
+
+  function write(id, body) {
+    const prev = queue.get(id) || Promise.resolve();
+    const next = prev.then(() => db.collection("outreach").doc(id).set(body)).catch((e) => {
+      setNotice(`Couldn't save that change (${e && e.code ? e.code : "error"}). Check you're signed in with edit access, then try again.`);
+    });
+    queue.set(id, next);
+  }
+
+  function toggle(id) {
+    if (!db) return;
+    const cur = outreach.get(id) || {};
+    const body = { ...cur, contacted: !cur.contacted, at: new Date().toISOString(), by: me || null };
+    outreach.set(id, body);
+    rerenderRow(id); stats();
+    write(id, body);
+  }
+
+  const noteTimers = new Map();
+  function saveNote(id, text) {
+    const cur = outreach.get(id) || { contacted: false };
+    if ((cur.note || "") === text) return;
+    const body = { ...cur, note: text.slice(0, 2000) };
+    outreach.set(id, body);
+    write(id, body);
+  }
+
+  document.addEventListener("click", async (ev) => {
+    const t = ev.target.closest("button");
+    if (!t) return;
+    const row = t.closest(".row");
+    if (t.classList.contains("copy")) {
+      const v = t.dataset.copy;
+      try { await navigator.clipboard.writeText(v); t.textContent = "Copied"; }
+      catch { const s = window.getSelection(), r = document.createRange(); r.selectNodeContents(t.previousElementSibling); s.removeAllRanges(); s.addRange(r); t.textContent = "Selected"; }
+      setTimeout(() => (t.textContent = "Copy"), 1400);
+    } else if (t.classList.contains("tick") && row) {
+      toggle(row.dataset.id);
+    } else if (t.classList.contains("more-btn") && row) {
+      const id = row.dataset.id; open.has(id) ? open.delete(id) : open.add(id); rerenderRow(id); resolveNames();
+    } else if (t.id === "loadMore") {
+      shown += PAGE; render();
+    }
+  });
+  document.addEventListener("input", (ev) => {
+    const id = ev.target.dataset && ev.target.dataset.note;
+    if (!id) return;
+    clearTimeout(noteTimers.get(id));
+    noteTimers.set(id, setTimeout(() => saveNote(id, ev.target.value), 900));
+  });
+  document.addEventListener("focusout", (ev) => {
+    const id = ev.target.dataset && ev.target.dataset.note;
+    if (id) { clearTimeout(noteTimers.get(id)); saveNote(id, ev.target.value); }
+  });
+  ["#q"].forEach((s) => { let t; $(s).addEventListener("input", () => { clearTimeout(t); t = setTimeout(apply, 180); }); });
+  ["#state", "#sector", "#tier", "#status", "#sort", "#hasEmail", "#hasWeb", "#hrOnly", "#yrOnly"].forEach((s) => $(s).addEventListener("change", apply));
+
+  async function connect() {
+    if (!window.claude || !window.claude.use) { setNotice("Open this page on claude.ai to tick farms as contacted."); return; }
+    [db, user] = await Promise.all([window.claude.use("db"), window.claude.use("user")]);
+    if (!db) { setNotice("Sign in to claude.ai to tick farms as contacted and add notes."); render(); return; }
+    me = user ? await user.id() : null;
+    const timer = setTimeout(() => setNotice("Contact status can't be reached yet; ticks may be out of date."), 10000);
+    db.collection("outreach").onSnapshot((snap) => {
+      if (!snap.metadata.fromCache) { clearTimeout(timer); if ($("#notice").textContent.startsWith("Contact status")) setNotice(""); }
+      const changed = [];
+      for (const ch of snap.docChanges()) {
+        const id = ch.doc.id;
+        if (ch.type === "removed") outreach.delete(id); else outreach.set(id, ch.doc.data());
+        changed.push(id);
+      }
+      if ($("#status").value) apply(); else { changed.forEach(rerenderRow); stats(); }
+    }, (e) => { clearTimeout(timer); setNotice(`Contact status stopped syncing (${e.code}). Reload the page to reconnect.`); });
+    render();
+  }
+
+  fetch("farms.json").then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); }).then((data) => {
+    farms = data.map((f) => ({ ...f, _text: [f.name, f.dba, f.city, f.state, f.sector, ...f.jobs, ...f.contacts.flatMap((c) => [c.name, c.email, c.title])].join(" ").toLowerCase() }));
+    const states = [...new Set(farms.map((f) => f.state).filter(Boolean))].sort();
+    fillSelect("#state", states.map((s) => [s, s]));
+    const secs = Object.entries(farms.reduce((m, f) => ((m[f.sector] = (m[f.sector] || 0) + 1), m), {})).filter(([s]) => s).sort((a, b) => b[1] - a[1]);
+    fillSelect("#sector", secs.map(([s, n]) => [s, `${s} (${n})`]));
+    apply();
+    connect();
+  }).catch((e) => { $("#list").innerHTML = `<div class="empty">The farm list didn't load (${esc(e.message)}). Reload the page to try again.</div>`; });
+})();
+</script>

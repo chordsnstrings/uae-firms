@@ -52,7 +52,10 @@ def main():
     cache = {}
     if os.path.exists(os.path.join(I, "places_cache.jsonl")):
         for line in open(os.path.join(I, "places_cache.jsonl")):
-            r = json.loads(line)
+            try:
+                r = json.loads(line)
+            except json.JSONDecodeError:  # a line still being written by enrich_places
+                continue
             if "candidates" in r:
                 cache[str(r["id"])] = r
     out, stats = [], {"places_match": 0, "web_places": 0}

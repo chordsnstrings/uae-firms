@@ -1,7 +1,7 @@
 """Enrich employers with Google Places API (New) Text Search: website, phone, rating, status, maps link.
 
 Needs GOOGLE_PLACES_API_KEY in the environment. Results are cached in data/interim/places_cache.jsonl
-so a rerun never bills the same employer twice. Usage: enrich_places.py [--limit N] [--ids-file f]
+so a rerun never bills the same employer twice. Usage: enrich_places.py [--limit N] [--ids-file f] [--input records.json] [--cache f.jsonl]
 """
 import argparse, json, os, re, threading, time
 from concurrent.futures import ThreadPoolExecutor
@@ -38,7 +38,8 @@ def score(emp, place):
         return "", sim
     same_city = bool(emp["city"]) and emp["city"].lower() in addr.lower()
     web = (place.get("websiteUri") or "").lower()
-    dom_match = any(c["email"].split("@")[-1] in web for c in emp.get("contacts", []) if "@" in c["email"])
+    people = emp.get("contacts") or emp.get("attorneys") or []
+    dom_match = any(c["email"].split("@")[-1] in web for c in people if "@" in c.get("email", ""))
     if dom_match or sim >= 0.85 or (contained and same_city):
         return "high", sim
     if sim >= 0.7 or contained or shared >= 2:
@@ -76,19 +77,21 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--ids-file", default=os.path.join(D, "enrich_ids.json"))
+    ap.add_argument("--input", default=os.path.join(D, "employers.json"), help="JSON array of records with id/name/city/state")
+    ap.add_argument("--cache", default=CACHE)
     a = ap.parse_args()
     key = os.environ["GOOGLE_PLACES_API_KEY"]
-    emps = {str(e["id"]): e for e in json.load(open(os.path.join(D, "employers.json")))}
+    emps = {str(e["id"]): e for e in json.load(open(a.input))}
     ids = [str(i) for i in json.load(open(a.ids_file))]
     done = set()
-    if os.path.exists(CACHE):
-        done = {str(json.loads(l)["id"]) for l in open(CACHE) if '"candidates"' in l}
+    if os.path.exists(a.cache):
+        done = {str(json.loads(l)["id"]) for l in open(a.cache) if '"candidates"' in l}
     todo = [emps[i] for i in ids if i not in done and i in emps]
     if a.limit:
         todo = todo[: a.limit]
     print(f"{len(done)} cached, {len(todo)} to look up")
     stats = {"high": 0, "medium": 0, "": 0, "error": 0}
-    with open(CACHE, "a") as f, ThreadPoolExecutor(4) as ex:
+    with open(a.cache, "a") as f, ThreadPoolExecutor(4) as ex:
         for res in ex.map(lambda e: lookup(e, key), todo):
             with lock:
                 f.write(json.dumps(res) + "\n")

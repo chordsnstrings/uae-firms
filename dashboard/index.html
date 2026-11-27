@@ -1,4 +1,4 @@
-<title>Farm EB-3 Prospects</title>
+<title>EB-3 Farm & Firm Prospects</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=Public+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
@@ -40,6 +40,10 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 .toggles { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: end; grid-column: 1 / -1; font-size: .85rem }
 .toggles label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer }
 .toggles input { width: auto }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); flex-wrap: wrap }
+.tab { padding: 8px 14px; color: var(--muted); text-decoration: none; font: 600 .95rem/1.2 var(--display); border-bottom: 3px solid transparent; margin-bottom: -1px }
+.tab[aria-current="page"] { color: var(--fg); border-bottom-color: var(--accent) }
+.tab span { font: 500 .78rem var(--mono); color: var(--muted) }
 .notice { font-size: .88rem; padding: 8px 12px; border-radius: 8px; background: var(--wheat-bg); color: var(--fg) }
 .count { font-size: .85rem; color: var(--muted) }
 .list { display: grid; gap: 6px }
@@ -92,11 +96,16 @@ footer { color: var(--muted); font-size: .78rem; max-width: 90ch }
 
 <div class="wrap">
   <header>
-    <h1>Farm EB-3 Prospects</h1>
-    <p class="sub">US farms that have filed PERM green-card certifications (the EB-3 route) or hired H-2A workers, from US Department of Labor OFLC disclosure data FY2024–FY2026, with contacts from the filings and websites from Google Places.</p>
+    <h1>EB-3 Farm &amp; Firm Prospects</h1>
+    <p class="sub" id="sub-farms">US farms that have filed PERM green-card certifications (the EB-3 route) or hired H-2A workers, from US Department of Labor OFLC disclosure data FY2024–FY2026, with contacts from the filings and websites from Google Places.</p>
+    <p class="sub" id="sub-firms" hidden>Immigration law firms and agents ranked by the EB-3 worker-level PERM cases they filed FY2024–FY2026 (care aides, food, cleaning, farm, construction, production and driver roles), from DOL disclosure data. Contacts are the attorneys named on those filings.</p>
   </header>
+  <nav class="tabs" aria-label="Lists">
+    <a href="#farms" id="tab-farms" class="tab">Farms <span id="n-farms"></span></a>
+    <a href="#firms" id="tab-firms" class="tab">EB-3 law firms <span id="n-firms"></span></a>
+  </nav>
   <div class="stats" id="stats" aria-live="polite"></div>
-  <section class="filters" aria-label="Filters">
+  <section class="filters" aria-label="Farm filters" data-view="farms">
     <label class="f search">Search<input id="q" type="search" placeholder="Farm, city, contact, crop…"></label>
     <label class="f">State<select id="state"><option value="">All states</option></select></label>
     <label class="f">Sector<select id="sector"><option value="">All sectors</option></select></label>
@@ -110,168 +119,249 @@ footer { color: var(--muted); font-size: .78rem; max-width: 90ch }
       <label><input type="checkbox" id="yrOnly"> Year-round sectors</label>
     </div>
   </section>
+  <section class="filters" aria-label="Law firm filters" data-view="firms" hidden>
+    <label class="f search">Search<input id="m-q" type="search" placeholder="Firm, attorney, city, client, role…"></label>
+    <label class="f">Office state<select id="m-state"><option value="">All states</option></select></label>
+    <label class="f">Focus<select id="m-focus"><option value="">All firms</option><option value="spec">EB-3 specialists</option><option value="ag">Has farm clients</option></select></label>
+    <label class="f">Representative<select id="m-type"><option value="">Attorneys &amp; agents</option><option value="Attorney">Attorneys</option><option value="Agent">Agents</option></select></label>
+    <label class="f">Status<select id="m-status"><option value="">Any</option><option value="todo">Not contacted</option><option value="done">Contacted</option></select></label>
+    <label class="f">Sort<select id="m-sort"><option value="score">Best match</option><option value="eb3">Most EB-3 cases</option><option value="appr">Highest approval</option><option value="ag">Most farm clients</option><option value="name">Name A–Z</option></select></label>
+    <div class="toggles">
+      <label><input type="checkbox" id="m-hasWeb"> Has website</label>
+      <label><input type="checkbox" id="m-big"> 100+ EB-3 cases</label>
+    </div>
+  </section>
   <div class="notice" id="notice" hidden></div>
   <div class="count" id="count"></div>
   <div class="list" id="list"><div class="empty">Loading farms…</div></div>
   <button class="load" id="loadMore" hidden>Show 50 more</button>
-  <footer>Contacts are the employer points of contact listed on public DOL filings. "Website" comes from Google Places, the filing itself, or the contact's email domain (marked). Ticks and notes are shared with everyone who can open this page.</footer>
+  <footer>Contacts are the employer and attorney points of contact listed on public DOL filings. "EB-3 worker-level" means the PERM job is a non-degree occupation, which files under EB-3 (skilled or other workers), not EB-2. "Website" comes from Google Places, the filing itself, or the contact's email domain (marked). Ticks and notes are shared with everyone who can open this page.</footer>
 </div>
 
 <script>
 (() => {
   const $ = (s) => document.querySelector(s);
   const PAGE = 50;
-  let farms = [], view = [], shown = PAGE, outreach = new Map(), db = null, user = null, me = null;
-  const open = new Set(), queue = new Map(), names = new Map();
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const safeUrl = (u) => (/^https:\/\//i.test(u || "") ? u : "");
-  const HR = /hr|human|personnel|people|recruit|talent|owner|president|ceo|manager|director|partner|member|principal|general/i;
-  const isDone = (id) => !!outreach.get(id)?.contacted;
   const fmt = (n) => Number(n || 0).toLocaleString("en-US");
+  const pct = (x) => (x == null ? "–" : Math.round(x * 100) + "%");
+  const HR = /hr|human|personnel|people|recruit|talent|owner|president|ceo|manager|director|partner|member|principal|general/i;
+  const tickSvg = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+
+  // Two lists share one engine; each keeps its own data, filters and shared tick collection.
+  const V = {
+    farms: { file: "farms.json", coll: "outreach", data: [], view: [], shown: PAGE, marks: new Map(), loaded: false },
+    firms: { file: "firms.json", coll: "firm_outreach", data: [], view: [], shown: PAGE, marks: new Map(), loaded: false },
+  };
+  let cur = "farms", db = null, user = null, me = null;
+  const open = new Set(), queue = new Map(), names = new Map(), noteTimers = new Map();
+  const isDone = (v, id) => !!V[v].marks.get(id)?.contacted;
 
   function setNotice(text) { const n = $("#notice"); n.textContent = text || ""; n.hidden = !text; }
-
   function fillSelect(id, values) {
     const sel = $(id);
     for (const [v, label] of values) { const o = document.createElement("option"); o.value = v; o.textContent = label; sel.append(o); }
   }
+  const copyBtn = (v) => `<button class="copy" data-copy="${esc(v)}" type="button">Copy</button>`;
+  const lineHtml = (v) => (v ? `<span class="line"><span class="val">${esc(v)}</span>${copyBtn(v)}</span>` : "");
 
-  function apply() {
+  // ---------- filters ----------
+  function filterFarms() {
     const q = $("#q").value.trim().toLowerCase(), st = $("#state").value, sec = $("#sector").value, tier = $("#tier").value,
       status = $("#status").value, sort = $("#sort").value;
-    view = farms.filter((f) => {
+    const out = V.farms.data.filter((f) => {
       if (st && f.state !== st) return false;
       if (sec && f.sector !== sec) return false;
       if (tier && f.tier !== tier) return false;
-      if (status === "done" && !isDone(f.id)) return false;
-      if (status === "todo" && isDone(f.id)) return false;
+      if (status === "done" && !isDone("farms", f.id)) return false;
+      if (status === "todo" && isDone("farms", f.id)) return false;
       if ($("#hasEmail").checked && !f.contacts.length) return false;
       if ($("#hasWeb").checked && !f.website) return false;
       if ($("#yrOnly").checked && !f.yearRound) return false;
       if ($("#hrOnly").checked && !f.contacts.some((c) => HR.test(c.title))) return false;
-      if (q && !f._text.includes(q)) return false;
-      return true;
+      return !q || f._text.includes(q);
     });
     const by = { score: (a, b) => b.score - a.score, perm: (a, b) => b.perm - a.perm || b.score - a.score,
       h2a: (a, b) => b.h2aWorkers - a.h2aWorkers, name: (a, b) => a.name.localeCompare(b.name),
       state: (a, b) => a.state.localeCompare(b.state) || b.score - a.score }[sort];
-    view.sort(by);
-    shown = PAGE;
+    return out.sort(by);
+  }
+  function filterFirms() {
+    const q = $("#m-q").value.trim().toLowerCase(), st = $("#m-state").value, focus = $("#m-focus").value, type = $("#m-type").value,
+      status = $("#m-status").value, sort = $("#m-sort").value;
+    const out = V.firms.data.filter((f) => {
+      if (st && f.state !== st) return false;
+      if (focus === "spec" && !f.specialist) return false;
+      if (focus === "ag" && !f.agClients) return false;
+      if (type && f.type !== type) return false;
+      if (status === "done" && !isDone("firms", f.id)) return false;
+      if (status === "todo" && isDone("firms", f.id)) return false;
+      if ($("#m-hasWeb").checked && !f.website) return false;
+      if ($("#m-big").checked && f.eb3 < 100) return false;
+      return !q || f._text.includes(q);
+    });
+    const by = { score: (a, b) => b.score - a.score, eb3: (a, b) => b.eb3 - a.eb3,
+      appr: (a, b) => (b.approval ?? 0) - (a.approval ?? 0) || b.eb3 - a.eb3, ag: (a, b) => b.agClients - a.agClients || b.score - a.score,
+      name: (a, b) => a.name.localeCompare(b.name) }[sort];
+    return out.sort(by);
+  }
+  function apply() {
+    const v = V[cur];
+    if (!v.loaded) return;
+    v.view = cur === "farms" ? filterFarms() : filterFirms();
+    v.shown = PAGE;
     render();
   }
 
-  function stats() {
-    const done = farms.filter((f) => isDone(f.id)).length;
-    const items = [["Farms", fmt(farms.length)], ["Filed PERM (EB-3)", fmt(farms.filter((f) => f.tier === "A").length)],
-      ["With email contact", fmt(farms.filter((f) => f.contacts.length).length)], ["With website", fmt(farms.filter((f) => f.website).length)],
-      ["Contacted", fmt(done), "done"]];
-    $("#stats").innerHTML = items.map(([l, v, c]) => `<div class="stat ${c || ""}"><b>${v}</b><span>${l}</span></div>`).join("");
-  }
-
-  const tickSvg = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
-
+  // ---------- rows ----------
   function contactHtml(c) {
     if (!c) return '<div class="contact"><span class="role">No contact on file</span></div>';
     return `<div class="contact"><span class="who">${esc(c.name || "Contact")}</span>${c.title ? `<span class="role">${esc(c.title)}</span>` : ""}
-      ${c.email ? `<span class="line"><span class="val">${esc(c.email)}</span><button class="copy" data-copy="${esc(c.email)}" type="button">Copy</button></span>` : ""}
-      ${c.phone ? `<span class="line"><span class="val">${esc(c.phone)}</span><button class="copy" data-copy="${esc(c.phone)}" type="button">Copy</button></span>` : ""}</div>`;
+      ${c.cases ? `<span class="role">${fmt(c.cases)} EB-3 cases</span>` : ""}${lineHtml(c.email)}${lineHtml(c.phone)}</div>`;
   }
-
-  function rowHtml(f) {
-    const done = isDone(f.id), o = outreach.get(f.id) || {};
-    const web = safeUrl(f.website);
+  function webHtml(f) {
+    const web = safeUrl(f.website), g = f.google;
+    return `<div class="web">${web ? `<a href="${esc(web)}" target="_blank" rel="noopener">${esc(web.replace(/^https:\/\/(www\.)?/, ""))}</a><span class="src">via ${esc(f.websiteSource)}</span>` : '<span class="src">No website found</span>'}
+      ${lineHtml(f.phone)}${g && g.rating ? `<span class="src">★ ${esc(g.rating)} · ${fmt(g.userRatingCount)} Google reviews</span>` : ""}</div>`;
+  }
+  function shell(v, f, chips, metaLine, contact) {
+    const done = isDone(v, f.id), o = V[v].marks.get(f.id) || {}, key = v + ":" + f.id;
+    let html = `<article class="row${done ? " is-done" : ""}" data-view="${v}" data-id="${esc(f.id)}">
+      <button class="tick" type="button" aria-pressed="${done}" aria-label="Mark ${esc(f.name)} as contacted" ${db ? "" : "disabled"}>${tickSvg}</button>
+      <div><h2 class="name">${esc(f.name)}</h2><div class="meta">${metaLine}</div><div class="chips">${chips}</div>
+        ${done ? `<div class="status-line">Contacted${o.at ? " " + esc(new Date(o.at).toLocaleDateString()) : ""}</div>` : ""}</div>
+      ${contact}${webHtml(f)}
+      <button class="more-btn" type="button" aria-expanded="${open.has(key)}" aria-label="Details for ${esc(f.name)}">${open.has(key) ? "−" : "+"}</button>`;
+    if (open.has(key)) html += (v === "farms" ? farmDetail(f, o) : firmDetail(f, o));
+    return html + "</article>";
+  }
+  function farmRow(f) {
     const chips = [f.tier === "A" ? `<span class="chip a">PERM ×${fmt(f.perm)}</span>` : `<span class="chip">H-2A only</span>`,
       f.h2aWorkers ? `<span class="chip">${fmt(f.h2aWorkers)} H-2A workers</span>` : "",
       f.yearRound ? `<span class="chip yr">Year-round sector</span>` : "",
       f.employees ? `<span class="chip">~${fmt(f.employees)} staff</span>` : ""].join("");
-    const g = f.google;
-    let html = `<article class="row${done ? " is-done" : ""}" data-id="${esc(f.id)}">
-      <button class="tick" type="button" aria-pressed="${done}" aria-label="Mark ${esc(f.name)} as contacted" ${db ? "" : "disabled"}>${tickSvg}</button>
-      <div><h2 class="name">${esc(f.name)}</h2><div class="meta">${esc(f.city)}, ${esc(f.state)} · ${esc(f.sector || "Agriculture")}</div><div class="chips">${chips}</div>
-        ${done ? `<div class="status-line">Contacted${o.at ? " " + esc(new Date(o.at).toLocaleDateString()) : ""}</div>` : ""}</div>
-      ${contactHtml(f.contacts[0])}
-      <div class="web">${web ? `<a href="${esc(web)}" target="_blank" rel="noopener">${esc(web.replace(/^https:\/\/(www\.)?/, ""))}</a><span class="src">via ${esc(f.websiteSource)}</span>` : '<span class="src">No website found</span>'}
-        ${f.phone ? `<span class="line"><span class="val">${esc(f.phone)}</span><button class="copy" data-copy="${esc(f.phone)}" type="button">Copy</button></span>` : ""}
-        ${g && g.rating ? `<span class="src">★ ${esc(g.rating)} · ${fmt(g.userRatingCount)} Google reviews</span>` : ""}</div>
-      <button class="more-btn" type="button" aria-expanded="${open.has(f.id)}" aria-label="Details for ${esc(f.name)}">${open.has(f.id) ? "−" : "+"}</button>`;
-    if (open.has(f.id)) html += detailHtml(f, o);
-    return html + "</article>";
+    return shell("farms", f, chips, `${esc(f.city)}, ${esc(f.state)} · ${esc(f.sector || "Agriculture")}`, contactHtml(f.contacts[0]));
   }
-
-  function detailHtml(f, o) {
+  function firmRow(f) {
+    const chips = [`<span class="chip a">EB-3 ×${fmt(f.eb3)}</span>`, `<span class="chip">${pct(f.eb3Share)} of PERM work</span>`,
+      f.approval != null ? `<span class="chip">${pct(f.approval)} approved</span>` : "",
+      f.specialist ? `<span class="chip yr">EB-3 specialist</span>` : "",
+      f.agClients ? `<span class="chip yr">${fmt(f.agClients)} farm clients</span>` : "",
+      f.type === "Agent" ? `<span class="chip">Agent, not attorney</span>` : ""].join("");
+    return shell("firms", f, chips, `${esc(f.city)}, ${esc(f.state)} · ${fmt(f.clients)} employer clients`, contactHtml(f.attorneys[0]));
+  }
+  function noteHtml(v, f, o) {
+    const by = o.by ? names.get(o.by) || "" : "";
+    return `<h3>Outreach note</h3><textarea id="note-${v}-${esc(f.id)}" data-note="${v}:${esc(f.id)}" rows="3" placeholder="${db ? "Who you spoke to, next step…" : "Sign in to add notes"}" ${db ? "" : "disabled"}>${esc(o.note || "")}</textarea>
+      ${o.contacted ? `<div class="status-line">Marked contacted${by ? " by " + esc(by) : ""}${o.at ? " on " + esc(new Date(o.at).toLocaleString()) : ""}</div>` : ""}`;
+  }
+  function googleKv(f) {
     const g = f.google, maps = safeUrl(g && g.maps);
-    const by = o.by ? (names.get(o.by) || "") : "";
+    return (g ? `<dt>Google listing</dt><dd>${esc(g.name)}${g.type ? " · " + esc(g.type) : ""}${g.status && g.status !== "OPERATIONAL" ? " · " + esc(g.status.toLowerCase().replace(/_/g, " ")) : ""}${maps ? ` · <a href="${esc(maps)}" target="_blank" rel="noopener">Map</a>` : ""}</dd>` : "")
+      + (g && g.phone && g.phone !== f.phone ? `<dt>Google phone</dt><dd>${esc(g.phone)}</dd>` : "");
+  }
+  function farmDetail(f, o) {
     return `<div class="detail"><div><h3>About</h3><p>${esc(f.summary)}</p>
-      ${f.jobs.length ? `<h3>Roles filed</h3><p>${f.jobs.map(esc).join(" · ")}</p>` : ""}
-      <h3>Outreach note</h3><textarea id="note-${esc(f.id)}" data-note="${esc(f.id)}" rows="3" placeholder="${db ? "Who you spoke to, next step…" : "Sign in to add notes"}" ${db ? "" : "disabled"}>${esc(o.note || "")}</textarea>
-      ${o.contacted ? `<div class="status-line">Marked contacted${by ? " by " + esc(by) : ""}${o.at ? " on " + esc(new Date(o.at).toLocaleString()) : ""}</div>` : ""}</div>
+      ${f.jobs.length ? `<h3>Roles filed</h3><p>${f.jobs.map(esc).join(" · ")}</p>` : ""}${noteHtml("farms", f, o)}</div>
       <div><h3>All contacts</h3><div class="clist">${f.contacts.map(contactHtml).join("") || '<span class="src">None on file</span>'}</div>
       <dl class="kv"><dt>Address</dt><dd>${esc([f.address, f.city, f.state, f.zip].filter(Boolean).join(", "))}</dd>
-        ${f.dba ? `<dt>Trades as</dt><dd>${esc(f.dba)}</dd>` : ""}
-        <dt>NAICS</dt><dd>${esc(f.naics)} ${esc(f.sector)}</dd>
+        ${f.dba ? `<dt>Trades as</dt><dd>${esc(f.dba)}</dd>` : ""}<dt>NAICS</dt><dd>${esc(f.naics)} ${esc(f.sector)}</dd>
         ${f.founded ? `<dt>Founded</dt><dd>${esc(f.founded)}</dd>` : ""}
         ${f.otherStates.length ? `<dt>Also hires in</dt><dd>${esc(f.otherStates.join(", "))}</dd>` : ""}
         ${f.lawFirm ? `<dt>Immigration counsel</dt><dd>${esc(f.lawFirm)}</dd>` : ""}
-        <dt>Last DOL filing</dt><dd>${esc(f.lastFiling)}</dd>
-        ${g ? `<dt>Google listing</dt><dd>${esc(g.name)}${g.type ? " · " + esc(g.type) : ""}${g.status && g.status !== "OPERATIONAL" ? " · " + esc(g.status.toLowerCase().replace(/_/g, " ")) : ""}${maps ? ` · <a href="${esc(maps)}" target="_blank" rel="noopener">Map</a>` : ""}</dd>` : ""}
-        ${g && g.phone && g.phone !== f.phone ? `<dt>Google phone</dt><dd>${esc(g.phone)}</dd>` : ""}
-      </dl></div></div>`;
+        <dt>Last DOL filing</dt><dd>${esc(f.lastFiling)}</dd>${googleKv(f)}</dl></div></div>`;
   }
+  function firmDetail(f, o) {
+    const pairs = (xs) => xs.map(([k, n]) => `${esc(k)} (${fmt(n)})`).join(" · ");
+    return `<div class="detail"><div><h3>About</h3><p>${esc(f.summary)}</p>
+      <h3>EB-3 roles filed</h3><p>${pairs(f.roles)}</p>
+      <h3>Client industries</h3><p>${pairs(f.industries)}</p>
+      ${f.sampleClients.length ? `<h3>Largest EB-3 clients</h3><p>${f.sampleClients.map(esc).join(" · ")}</p>` : ""}${noteHtml("firms", f, o)}</div>
+      <div><h3>Attorneys on EB-3 filings</h3><div class="clist">${f.attorneys.map(contactHtml).join("")}</div>
+      <dl class="kv"><dt>Office</dt><dd>${esc([f.address, f.city, f.state, f.zip].filter(Boolean).join(", "))}</dd>
+        <dt>Representative</dt><dd>${esc(f.type)}</dd>
+        <dt>EB-3 cases</dt><dd>${fmt(f.eb3)} filed · ${fmt(f.eb3Cert)} certified · ${fmt(f.eb3Denied)} denied</dd>
+        <dt>All PERM cases</dt><dd>${fmt(f.totalPerm)}</dd>
+        ${f.clientStates.length ? `<dt>Worksite states</dt><dd>${esc(f.clientStates.join(", "))}</dd>` : ""}
+        ${f.agClients ? `<dt>Farm clients</dt><dd>${fmt(f.agClients)} employers · ${fmt(f.agCases)} cases</dd>` : ""}
+        <dt>Last filing</dt><dd>${esc(f.lastFiling)}</dd>${googleKv(f)}</dl></div></div>`;
+  }
+  const rowFor = (v, f) => (v === "farms" ? farmRow(f) : firmRow(f));
 
+  // ---------- render ----------
+  function stats() {
+    const v = V[cur], d = v.data, done = d.filter((f) => isDone(cur, f.id)).length;
+    const items = cur === "farms"
+      ? [["Farms", fmt(d.length)], ["Filed PERM (EB-3)", fmt(d.filter((f) => f.tier === "A").length)],
+         ["With email contact", fmt(d.filter((f) => f.contacts.length).length)], ["With website", fmt(d.filter((f) => f.website).length)]]
+      : [["Firms & agents", fmt(d.length)], ["EB-3 specialists", fmt(d.filter((f) => f.specialist).length)],
+         ["With farm clients", fmt(d.filter((f) => f.agClients).length)], ["EB-3 cases filed", fmt(d.reduce((s, f) => s + f.eb3, 0))]];
+    items.push(["Contacted", fmt(done), "done"]);
+    $("#stats").innerHTML = items.map(([l, val, c]) => `<div class="stat ${c || ""}"><b>${val}</b><span>${l}</span></div>`).join("");
+  }
   function render() {
-    const list = $("#list");
-    const slice = view.slice(0, shown);
-    list.innerHTML = slice.length ? slice.map(rowHtml).join("") : '<div class="empty">No farms match these filters. Clear a filter or search to see more.</div>';
-    $("#count").textContent = `Showing ${fmt(slice.length)} of ${fmt(view.length)} matching farms`;
-    $("#loadMore").hidden = shown >= view.length;
+    const v = V[cur], list = $("#list");
+    if (!v.loaded) { list.innerHTML = '<div class="empty">Loading…</div>'; return; }
+    const slice = v.view.slice(0, v.shown);
+    list.innerHTML = slice.length ? slice.map((f) => rowFor(cur, f)).join("") : '<div class="empty">Nothing matches these filters. Clear a filter or search to see more.</div>';
+    $("#count").textContent = `Showing ${fmt(slice.length)} of ${fmt(v.view.length)} matching ${cur === "farms" ? "farms" : "firms"}`;
+    $("#loadMore").hidden = v.shown >= v.view.length;
     stats();
     resolveNames();
   }
-
-  function rerenderRow(id) {
-    const el = document.querySelector(`.row[data-id="${CSS.escape(id)}"]`);
-    const f = farms.find((x) => x.id === id);
-    if (!el || !f) return;
-    const active = document.activeElement && el.contains(document.activeElement) && document.activeElement.tagName === "TEXTAREA";
-    if (active) return; // don't clobber a note being typed
-    el.outerHTML = rowHtml(f);
+  function rerenderRow(v, id) {
+    const el = document.querySelector(`.row[data-view="${v}"][data-id="${CSS.escape(id)}"]`);
+    if (!el) return;
+    if (el.contains(document.activeElement) && document.activeElement.tagName === "TEXTAREA") return; // keep a note being typed
+    const f = V[v].data.find((x) => x.id === id);
+    if (f) el.outerHTML = rowFor(v, f);
   }
-
   async function resolveNames() {
     if (!user || !user.profiles) return;
-    const ids = [...new Set(view.slice(0, shown).filter((f) => open.has(f.id)).map((f) => outreach.get(f.id)?.by).filter((x) => x && !names.has(x)))];
+    const v = V[cur];
+    const ids = [...new Set(v.view.slice(0, v.shown).filter((f) => open.has(cur + ":" + f.id)).map((f) => v.marks.get(f.id)?.by).filter((x) => x && !names.has(x)))];
     if (!ids.length) return;
     try {
       const ps = await user.profiles(ids);
       ids.forEach((id) => names.set(id, (ps[id] && ps[id].name) || "a teammate"));
-      view.slice(0, shown).filter((f) => open.has(f.id)).forEach((f) => rerenderRow(f.id));
+      v.view.slice(0, v.shown).filter((f) => open.has(cur + ":" + f.id)).forEach((f) => rerenderRow(cur, f.id));
     } catch (e) { /* names are optional */ }
   }
+  function show(view) {
+    cur = view in V ? view : "farms";
+    for (const k of Object.keys(V)) {
+      $(`#tab-${k}`).setAttribute("aria-current", k === cur ? "page" : "false");
+      $(`#sub-${k}`).hidden = k !== cur;
+      document.querySelector(`.filters[data-view="${k}"]`).hidden = k !== cur;
+    }
+    $("#loadMore").textContent = "Show 50 more";
+    apply(); render();
+  }
 
-  function write(id, body) {
-    const prev = queue.get(id) || Promise.resolve();
-    const next = prev.then(() => db.collection("outreach").doc(id).set(body)).catch((e) => {
+  // ---------- shared ticks + notes ----------
+  function write(v, id, body) {
+    const k = v + ":" + id, prev = queue.get(k) || Promise.resolve();
+    const next = prev.then(() => db.collection(V[v].coll).doc(id).set(body)).catch((e) => {
       setNotice(`Couldn't save that change (${e && e.code ? e.code : "error"}). Check you're signed in with edit access, then try again.`);
     });
-    queue.set(id, next);
+    queue.set(k, next);
   }
-
-  function toggle(id) {
+  function toggle(v, id) {
     if (!db) return;
-    const cur = outreach.get(id) || {};
-    const body = { ...cur, contacted: !cur.contacted, at: new Date().toISOString(), by: me || null };
-    outreach.set(id, body);
-    rerenderRow(id); stats();
-    write(id, body);
+    const cur0 = V[v].marks.get(id) || {};
+    const body = { ...cur0, contacted: !cur0.contacted, at: new Date().toISOString(), by: me || null };
+    V[v].marks.set(id, body);
+    rerenderRow(v, id); stats();
+    write(v, id, body);
   }
-
-  const noteTimers = new Map();
-  function saveNote(id, text) {
-    const cur = outreach.get(id) || { contacted: false };
-    if ((cur.note || "") === text) return;
-    const body = { ...cur, note: text.slice(0, 2000) };
-    outreach.set(id, body);
-    write(id, body);
+  function saveNote(k, text) {
+    const [v, id] = [k.slice(0, k.indexOf(":")), k.slice(k.indexOf(":") + 1)];
+    const cur0 = V[v].marks.get(id) || { contacted: false };
+    if ((cur0.note || "") === text) return;
+    const body = { ...cur0, note: text.slice(0, 2000) };
+    V[v].marks.set(id, body);
+    write(v, id, body);
   }
 
   document.addEventListener("click", async (ev) => {
@@ -279,58 +369,72 @@ footer { color: var(--muted); font-size: .78rem; max-width: 90ch }
     if (!t) return;
     const row = t.closest(".row");
     if (t.classList.contains("copy")) {
-      const v = t.dataset.copy;
-      try { await navigator.clipboard.writeText(v); t.textContent = "Copied"; }
+      try { await navigator.clipboard.writeText(t.dataset.copy); t.textContent = "Copied"; }
       catch { const s = window.getSelection(), r = document.createRange(); r.selectNodeContents(t.previousElementSibling); s.removeAllRanges(); s.addRange(r); t.textContent = "Selected"; }
       setTimeout(() => (t.textContent = "Copy"), 1400);
     } else if (t.classList.contains("tick") && row) {
-      toggle(row.dataset.id);
+      toggle(row.dataset.view, row.dataset.id);
     } else if (t.classList.contains("more-btn") && row) {
-      const id = row.dataset.id; open.has(id) ? open.delete(id) : open.add(id); rerenderRow(id); resolveNames();
+      const k = row.dataset.view + ":" + row.dataset.id;
+      open.has(k) ? open.delete(k) : open.add(k);
+      rerenderRow(row.dataset.view, row.dataset.id); resolveNames();
     } else if (t.id === "loadMore") {
-      shown += PAGE; render();
+      V[cur].shown += PAGE; render();
     }
   });
   document.addEventListener("input", (ev) => {
-    const id = ev.target.dataset && ev.target.dataset.note;
-    if (!id) return;
-    clearTimeout(noteTimers.get(id));
-    noteTimers.set(id, setTimeout(() => saveNote(id, ev.target.value), 900));
+    const k = ev.target.dataset && ev.target.dataset.note;
+    if (!k) return;
+    clearTimeout(noteTimers.get(k));
+    noteTimers.set(k, setTimeout(() => saveNote(k, ev.target.value), 900));
   });
   document.addEventListener("focusout", (ev) => {
-    const id = ev.target.dataset && ev.target.dataset.note;
-    if (id) { clearTimeout(noteTimers.get(id)); saveNote(id, ev.target.value); }
+    const k = ev.target.dataset && ev.target.dataset.note;
+    if (k) { clearTimeout(noteTimers.get(k)); saveNote(k, ev.target.value); }
   });
-  ["#q"].forEach((s) => { let t; $(s).addEventListener("input", () => { clearTimeout(t); t = setTimeout(apply, 180); }); });
-  ["#state", "#sector", "#tier", "#status", "#sort", "#hasEmail", "#hasWeb", "#hrOnly", "#yrOnly"].forEach((s) => $(s).addEventListener("change", apply));
+  for (const s of ["#q", "#m-q"]) { let tm; $(s).addEventListener("input", () => { clearTimeout(tm); tm = setTimeout(apply, 180); }); }
+  ["#state", "#sector", "#tier", "#status", "#sort", "#hasEmail", "#hasWeb", "#hrOnly", "#yrOnly",
+   "#m-state", "#m-focus", "#m-type", "#m-status", "#m-sort", "#m-hasWeb", "#m-big"].forEach((s) => $(s).addEventListener("change", apply));
+  window.addEventListener("hashchange", () => show(location.hash.slice(1)));
 
   async function connect() {
-    if (!window.claude || !window.claude.use) { setNotice("Open this page on claude.ai to tick farms as contacted."); return; }
+    if (!window.claude || !window.claude.use) { setNotice("Open this page on claude.ai to tick prospects as contacted."); return; }
     [db, user] = await Promise.all([window.claude.use("db"), window.claude.use("user")]);
-    if (!db) { setNotice("Sign in to claude.ai to tick farms as contacted and add notes."); render(); return; }
+    if (!db) { setNotice("Sign in to claude.ai to tick prospects as contacted and add notes."); render(); return; }
     me = user ? await user.id() : null;
-    const timer = setTimeout(() => setNotice("Contact status can't be reached yet; ticks may be out of date."), 10000);
-    db.collection("outreach").onSnapshot((snap) => {
-      if (!snap.metadata.fromCache) { clearTimeout(timer); if ($("#notice").textContent.startsWith("Contact status")) setNotice(""); }
-      const changed = [];
-      for (const ch of snap.docChanges()) {
-        const id = ch.doc.id;
-        if (ch.type === "removed") outreach.delete(id); else outreach.set(id, ch.doc.data());
-        changed.push(id);
-      }
-      if ($("#status").value) apply(); else { changed.forEach(rerenderRow); stats(); }
-    }, (e) => { clearTimeout(timer); setNotice(`Contact status stopped syncing (${e.code}). Reload the page to reconnect.`); });
+    for (const v of Object.keys(V)) {
+      const timer = setTimeout(() => setNotice("Contact status can't be reached yet; ticks may be out of date."), 10000);
+      db.collection(V[v].coll).onSnapshot((snap) => {
+        if (!snap.metadata.fromCache) { clearTimeout(timer); if ($("#notice").textContent.startsWith("Contact status")) setNotice(""); }
+        const changed = [];
+        for (const ch of snap.docChanges()) {
+          if (ch.type === "removed") V[v].marks.delete(ch.doc.id); else V[v].marks.set(ch.doc.id, ch.doc.data());
+          changed.push(ch.doc.id);
+        }
+        if (v !== cur) return;
+        const statusSel = cur === "farms" ? "#status" : "#m-status";
+        if ($(statusSel).value) apply(); else { changed.forEach((id) => rerenderRow(v, id)); stats(); }
+      }, (e) => { clearTimeout(timer); setNotice(`Contact status stopped syncing (${e.code}). Reload the page to reconnect.`); });
+    }
     render();
   }
 
-  fetch("farms.json").then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); }).then((data) => {
-    farms = data.map((f) => ({ ...f, _text: [f.name, f.dba, f.city, f.state, f.sector, ...f.jobs, ...f.contacts.flatMap((c) => [c.name, c.email, c.title])].join(" ").toLowerCase() }));
-    const states = [...new Set(farms.map((f) => f.state).filter(Boolean))].sort();
-    fillSelect("#state", states.map((s) => [s, s]));
-    const secs = Object.entries(farms.reduce((m, f) => ((m[f.sector] = (m[f.sector] || 0) + 1), m), {})).filter(([s]) => s).sort((a, b) => b[1] - a[1]);
-    fillSelect("#sector", secs.map(([s, n]) => [s, `${s} (${n})`]));
-    apply();
-    connect();
-  }).catch((e) => { $("#list").innerHTML = `<div class="empty">The farm list didn't load (${esc(e.message)}). Reload the page to try again.</div>`; });
+  function load(v, prep) {
+    return fetch(V[v].file).then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); }).then((data) => {
+      V[v].data = data.map(prep); V[v].loaded = true;
+      $(`#n-${v}`).textContent = fmt(data.length);
+    });
+  }
+  Promise.all([
+    load("farms", (f) => ({ ...f, _text: [f.name, f.dba, f.city, f.state, f.sector, f.lawFirm, ...f.jobs, ...f.contacts.flatMap((c) => [c.name, c.email, c.title])].join(" ").toLowerCase() })).then(() => {
+      fillSelect("#state", [...new Set(V.farms.data.map((f) => f.state).filter(Boolean))].sort().map((s) => [s, s]));
+      const secs = Object.entries(V.farms.data.reduce((m, f) => ((m[f.sector] = (m[f.sector] || 0) + 1), m), {})).filter(([s]) => s).sort((a, b) => b[1] - a[1]);
+      fillSelect("#sector", secs.map(([s, n]) => [s, `${s} (${n})`]));
+    }),
+    load("firms", (f) => ({ ...f, _text: [f.name, f.city, f.state, ...f.sampleClients, ...f.roles.map((r) => r[0]), ...f.industries.map((r) => r[0]), ...f.attorneys.flatMap((a) => [a.name, a.email])].join(" ").toLowerCase() })).then(() => {
+      fillSelect("#m-state", [...new Set(V.firms.data.map((f) => f.state).filter(Boolean))].sort().map((s) => [s, s]));
+    }),
+  ]).then(() => { show(location.hash.slice(1)); connect(); })
+    .catch((e) => { $("#list").innerHTML = `<div class="empty">The lists didn't load (${esc(e.message)}). Reload the page to try again.</div>`; });
 })();
 </script>

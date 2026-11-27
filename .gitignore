@@ -3,6 +3,6 @@
 *.env
 # Downloaded DOL files, caches and generated outputs (contain contact details; regenerate with the pipeline)
 data/
-dashboard/farms.json
+dashboard/*.json
 __pycache__/
 *.pyc

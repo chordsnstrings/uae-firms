@@ -19,6 +19,16 @@ contacts. Contact emails from agent or law-firm domains that file for 5+ unrelat
 Websites come from Google Places (API "New" Text Search), the H-2A "website to apply" field, or the contact's
 company email domain. The `websiteSource` field says which.
 
+## EB-3 immigration firms
+
+`pipeline/build_firms.py` reads every PERM case (all industries) and groups them by the attorney/agent on the
+filing. A case counts as **EB-3 worker-level** when its occupation is a non-degree SOC group (31, 33, 35, 37, 39,
+41, 43, 45, 47, 49, 51, 53: care aides, food, cleaning, farm, construction, production, drivers…); those file
+under EB-3 skilled/other workers, not EB-2. FY2024 new-form rows have no SOC code, so job-title keywords stand in.
+Firms with ≥5 such cases are listed with case counts, share of their PERM work, approval rate, client
+industries and states, largest clients, farm clients, and the attorneys on those filings.
+"EB-3 specialist" = ≥20 EB-3 worker cases and ≥50% of the firm's PERM filings.
+
 ## Run
 
 ```bash
@@ -28,10 +38,14 @@ python pipeline/load_dol.py        # xlsx -> data/interim/*_ag.parquet (agricult
 python pipeline/build_dataset.py   # one row per employer, scored; picks the dashboard set -> data/interim/
 GOOGLE_PLACES_API_KEY=... python pipeline/enrich_places.py   # cached; reruns never re-bill
 python pipeline/export.py          # -> dashboard/farms.json + data/out/farms.csv
+python pipeline/build_firms.py     # -> dashboard/firms.json + data/out/firms.csv (EB-3 law firms)
+GOOGLE_PLACES_API_KEY=... python pipeline/enrich_places.py --input dashboard/firms.json \
+  --ids-file data/interim/firms_enrich_ids.json --cache data/interim/firms_places_cache.jsonl
+python pipeline/build_firms.py     # rerun to merge firm websites from Places
 ```
 
-The dashboard (`dashboard/index.html` + `farms.json`) is published as a claude.ai artifact. Ticks and
-notes are stored in the artifact's shared database (`outreach/<employer id>`).
+The dashboard (`dashboard/index.html` + `farms.json` + `firms.json`) is published as a claude.ai artifact. Ticks and
+notes are stored in the artifact's shared database (`outreach/<employer id>`, `firm_outreach/<firm id>`).
 
 ## Costs
 

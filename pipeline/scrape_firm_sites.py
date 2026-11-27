@@ -4,8 +4,8 @@ Extracts: site title/description, about text, languages spoken, whether the site
 H-2B / PERM, worker source countries mentioned, social links, emails and phones published on the site, and
 a founding year. Cached per firm in data/interim/firm_sites.jsonl (rerun only fetches missing firms).
 """
-import json, os, re, threading
-from concurrent.futures import ThreadPoolExecutor
+import json, os, re, subprocess, threading, time
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FutTimeout
 from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
@@ -29,14 +29,20 @@ JUNK_EMAIL = re.compile(r"\.(png|jpg|jpeg|gif|svg|webp)$|example\.|sentry|wixpre
 lock = threading.Lock()
 
 
-def get(url):
+def get(url, budget=20):
+    """Fetch up to ~1.5 MB of HTML with curl; --max-time is a hard wall clock (covers proxy tunnel hangs)."""
     try:
-        r = requests.get(url, headers=UA, timeout=15, allow_redirects=True)
-        if r.status_code == 200 and "html" in r.headers.get("content-type", "html"):
-            return r.url, r.text[:1_500_000]
-        return r.url, None
-    except requests.RequestException:
+        p = subprocess.run(["curl", "-sL", "--compressed", "--max-time", str(budget), "--max-redirs", "5",
+                            "-A", UA["User-Agent"], "-H", "Accept-Language: en-US,en;q=0.9",
+                            "-w", "\n@@META@@%{url_effective} %{http_code} %{content_type}", url],
+                           capture_output=True, timeout=budget + 5)
+    except subprocess.TimeoutExpired:
         return url, None
+    body, _, meta = p.stdout.rpartition(b"\n@@META@@")
+    parts = meta.decode(errors="replace").split(" ", 2)
+    if len(parts) < 2 or parts[1] != "200" or (len(parts) == 3 and parts[2] and "html" not in parts[2]):
+        return (parts[0] if parts else url), None
+    return parts[0], body[:1_500_000].decode("utf-8", errors="replace")
 
 
 def text_of(soup):
@@ -79,10 +85,14 @@ def analyse(firm):
             about = about_snippet(asoup)
             pages_text += " " + text_of(asoup)
     about = about or about_snippet(soup)
+    pages_text = re.sub(r"\S{200,}", " ", pages_text[:400_000])
     langs = []
     if re.search(r"speak|language|habla|idioma|fluent|bilingual", pages_text, re.I):
         langs = sorted({LANG_NORM.get(l, l) for l in LANGS if re.search(rf"\b{l}\b", pages_text)})
     countries = sorted({c for c in COUNTRIES if re.search(rf"\b{re.escape(c)}\b", pages_text)})
+    # Drop inline data URIs / giant tokens first: regexes over megabytes of base64 go quadratic.
+    raw = re.sub(r"data:[^\"'\s)]+|\S{400,}", " ", raw[:2_000_000])
+    pages_text = pages_text[:400_000]
     social = {}
     for k, pat in SOCIAL.items():
         m = re.search(pat, raw, re.I)
@@ -106,12 +116,24 @@ def main():
     todo = [f for f in firms if f["id"] not in done]
     print(f"{len(done)} cached, {len(todo)} sites to visit")
     ok = 0
-    with open(CACHE, "a") as fh, ThreadPoolExecutor(16) as ex:
-        for res in ex.map(analyse, todo):
-            with lock:
+    ex = ThreadPoolExecutor(16)
+    futs = {ex.submit(analyse, f): f for f in todo}
+    with open(CACHE, "a") as fh:
+        try:
+            for fut in as_completed(futs, timeout=60 + 4 * len(todo)):
+                f = futs.pop(fut)
+                try:
+                    res = fut.result()
+                except Exception:  # a page that breaks the parser counts as unreadable
+                    res = {"id": f["id"], "ok": False}
                 fh.write(json.dumps(res, ensure_ascii=False) + "\n")
+                fh.flush()
                 ok += res["ok"]
+        except FutTimeout:
+            for f in futs.values():  # still hanging: record as unreadable and move on
+                fh.write(json.dumps({"id": f["id"], "ok": False, "timeout": True}) + "\n")
     print(f"read {ok} of {len(todo)} sites")
+    os._exit(0)  # don't wait for threads stuck on dead connections
 
 
 if __name__ == "__main__":

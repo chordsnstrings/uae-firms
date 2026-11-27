@@ -220,6 +220,8 @@ def main():
                 continue
             if x.get("ok"):
                 x["emails"] = [e for e in x["emails"] if EMAIL_OK.match(e)]
+                for k in ("title", "description", "about"):  # pages served in a mislabelled charset
+                    x[k] = re.sub(r"\s+", " ", x[k].replace("\ufffd", " ")).strip()
                 sites[x["id"]] = {k: x[k] for k in ("title", "description", "about", "languages", "countries", "social",
                                                     "emails", "phones", "founded", "mentions")}
     for r in out:

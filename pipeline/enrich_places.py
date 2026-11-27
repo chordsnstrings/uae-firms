@@ -79,8 +79,12 @@ def main():
     ap.add_argument("--ids-file", default=os.path.join(D, "enrich_ids.json"))
     ap.add_argument("--input", default=os.path.join(D, "employers.json"), help="JSON array of records with id/name/city/state")
     ap.add_argument("--cache", default=CACHE)
+    ap.add_argument("--summary", action="store_true", help="also request editorialSummary (Atmosphere SKU)")
     a = ap.parse_args()
     key = os.environ["GOOGLE_PLACES_API_KEY"]
+    global FIELDS
+    if a.summary:
+        FIELDS += ",places.editorialSummary"
     emps = {str(e["id"]): e for e in json.load(open(a.input))}
     ids = [str(i) for i in json.load(open(a.ids_file))]
     done = set()

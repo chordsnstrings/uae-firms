@@ -80,6 +80,12 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 .kv dt { color: var(--muted) } .kv dd { margin: 0; overflow-wrap: anywhere }
 .clist { display: grid; gap: 8px; margin-bottom: 10px }
 .status-line { font-size: .8rem; color: var(--done); margin-top: 4px }
+.trend { display: flex; gap: 14px; align-items: flex-end; height: 92px; margin: 4px 0 2px; font-variant-numeric: tabular-nums }
+.trend .bar { display: grid; justify-items: center; gap: 2px; width: 44px }
+.trend .bf { width: 28px; background: var(--accent); border-radius: 3px 3px 0 0 }
+.trend .bv { font: 500 .72rem var(--mono); color: var(--fg) }
+.trend .bl { font-size: .7rem; color: var(--muted); border-top: 1px solid var(--line); width: 100%; text-align: center; padding-top: 2px }
+.quote { color: var(--muted); font-size: .9rem; border-left: 3px solid var(--line); padding-left: 10px }
 .load { justify-self: center; border: 1px solid var(--line); background: var(--surface); color: var(--fg); padding: 9px 18px; border-radius: 8px; cursor: pointer; font-weight: 600 }
 .empty { padding: 32px; text-align: center; color: var(--muted); background: var(--surface); border: 1px dashed var(--line); border-radius: 10px }
 footer { color: var(--muted); font-size: .78rem; max-width: 90ch }
@@ -125,10 +131,13 @@ footer { color: var(--muted); font-size: .78rem; max-width: 90ch }
     <label class="f">Focus<select id="m-focus"><option value="">All firms</option><option value="spec">EB-3 specialists</option><option value="ag">Has farm clients</option></select></label>
     <label class="f">Representative<select id="m-type"><option value="">Attorneys &amp; agents</option><option value="Attorney">Attorneys</option><option value="Agent">Agents</option></select></label>
     <label class="f">Status<select id="m-status"><option value="">Any</option><option value="todo">Not contacted</option><option value="done">Contacted</option></select></label>
-    <label class="f">Sort<select id="m-sort"><option value="score">Best match</option><option value="eb3">Most EB-3 cases</option><option value="appr">Highest approval</option><option value="ag">Most farm clients</option><option value="name">Name A–Z</option></select></label>
+    <label class="f">Sort<select id="m-sort"><option value="score">Best match</option><option value="eb3">Most EB-3 cases</option><option value="appr">Highest approval</option><option value="ag">Most farm clients</option><option value="rating">Google rating</option><option value="growth">Fastest growing</option><option value="name">Name A–Z</option></select></label>
+    <label class="f">Language<select id="m-lang"><option value="">Any language</option></select></label>
     <div class="toggles">
       <label><input type="checkbox" id="m-hasWeb"> Has website</label>
       <label><input type="checkbox" id="m-big"> 100+ EB-3 cases</label>
+      <label><input type="checkbox" id="m-siteEb3"> Website mentions EB-3</label>
+      <label><input type="checkbox" id="m-h2a"> Also files H-2A</label>
     </div>
   </section>
   <div class="notice" id="notice" hidden></div>
@@ -189,7 +198,7 @@ footer { color: var(--muted); font-size: .78rem; max-width: 90ch }
   }
   function filterFirms() {
     const q = $("#m-q").value.trim().toLowerCase(), st = $("#m-state").value, focus = $("#m-focus").value, type = $("#m-type").value,
-      status = $("#m-status").value, sort = $("#m-sort").value;
+      status = $("#m-status").value, sort = $("#m-sort").value, lang = $("#m-lang").value;
     const out = V.firms.data.filter((f) => {
       if (st && f.state !== st) return false;
       if (focus === "spec" && !f.specialist) return false;
@@ -199,13 +208,20 @@ footer { color: var(--muted); font-size: .78rem; max-width: 90ch }
       if (status === "todo" && isDone("firms", f.id)) return false;
       if ($("#m-hasWeb").checked && !f.website) return false;
       if ($("#m-big").checked && f.eb3 < 100) return false;
+      if ($("#m-siteEb3").checked && !(f.site && f.site.mentions.eb3)) return false;
+      if ($("#m-h2a").checked && !f.h2a) return false;
+      if (lang && !(f.site && f.site.languages.includes(lang))) return false;
       return !q || f._text.includes(q);
     });
     const by = { score: (a, b) => b.score - a.score, eb3: (a, b) => b.eb3 - a.eb3,
       appr: (a, b) => (b.approval ?? 0) - (a.approval ?? 0) || b.eb3 - a.eb3, ag: (a, b) => b.agClients - a.agClients || b.score - a.score,
+      rating: (a, b) => (rated(b) - rated(a)) || b.eb3 - a.eb3,
+      growth: (a, b) => growth(b) - growth(a),
       name: (a, b) => a.name.localeCompare(b.name) }[sort];
     return out.sort(by);
   }
+  const rated = (f) => (f.google && f.google.rating && f.google.userRatingCount >= 5 ? f.google.rating : 0);
+  const growth = (f) => (f.byYear ? (f.byYear.FY2026 + 1) / (f.byYear.FY2025 + 1) : 0);
   function apply() {
     const v = V[cur];
     if (!v.loaded) return;
@@ -218,7 +234,7 @@ footer { color: var(--muted); font-size: .78rem; max-width: 90ch }
   function contactHtml(c) {
     if (!c) return '<div class="contact"><span class="role">No contact on file</span></div>';
     return `<div class="contact"><span class="who">${esc(c.name || "Contact")}</span>${c.title ? `<span class="role">${esc(c.title)}</span>` : ""}
-      ${c.cases ? `<span class="role">${fmt(c.cases)} EB-3 cases</span>` : ""}${lineHtml(c.email)}${lineHtml(c.phone)}</div>`;
+      ${c.cases ? `<span class="role">${fmt(c.cases)} EB-3 cases${c.bar ? " · Bar " + esc(c.bar) : ""}</span>` : ""}${lineHtml(c.email)}${lineHtml(c.phone)}</div>`;
   }
   function webHtml(f) {
     const web = safeUrl(f.website), g = f.google;
@@ -248,6 +264,9 @@ footer { color: var(--muted); font-size: .78rem; max-width: 90ch }
       f.approval != null ? `<span class="chip">${pct(f.approval)} approved</span>` : "",
       f.specialist ? `<span class="chip yr">EB-3 specialist</span>` : "",
       f.agClients ? `<span class="chip yr">${fmt(f.agClients)} farm clients</span>` : "",
+      f.h2a ? `<span class="chip yr">H-2A ×${fmt(f.h2a.cases)}</span>` : "",
+      rated(f) ? `<span class="chip">★ ${esc(f.google.rating)} (${fmt(f.google.userRatingCount)})</span>` : "",
+      growth(f) >= 1.5 && f.byYear.FY2026 >= 20 ? `<span class="chip">Growing fast</span>` : "",
       f.type === "Agent" ? `<span class="chip">Agent, not attorney</span>` : ""].join("");
     return shell("firms", f, chips, `${esc(f.city)}, ${esc(f.state)} · ${fmt(f.clients)} employer clients`, contactHtml(f.attorneys[0]));
   }
@@ -272,9 +291,34 @@ footer { color: var(--muted); font-size: .78rem; max-width: 90ch }
         ${f.lawFirm ? `<dt>Immigration counsel</dt><dd>${esc(f.lawFirm)}</dd>` : ""}
         <dt>Last DOL filing</dt><dd>${esc(f.lastFiling)}</dd>${googleKv(f)}</dl></div></div>`;
   }
+  function trendHtml(f) {
+    if (!f.byYear) return "";
+    const ys = Object.entries(f.byYear), max = Math.max(1, ...ys.map(([, n]) => n));
+    return `<div class="trend" role="img" aria-label="EB-3 cases by fiscal year: ${ys.map(([y, n]) => y + " " + n).join(", ")}">${ys.map(([y, n]) =>
+      `<div class="bar"><span class="bv">${fmt(n)}</span><span class="bf" style="height:${Math.max(3, Math.round((n / max) * 56))}px"></span><span class="bl">${y.replace("FY20", "FY")}${y === "FY2024" ? "*" : ""}</span></div>`).join("")}</div>
+      <p class="src">*FY2024 counts only cases on the new DOL form (from mid-2023), so it is partial.</p>`;
+  }
+  function siteHtml(f) {
+    const w = f.site, g = f.google;
+    if (!w && !(g && g.summary)) return "";
+    const soc = w ? Object.entries(w.social).filter(([, u]) => safeUrl(u)).map(([k, u]) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(k === "x" ? "X" : k[0].toUpperCase() + k.slice(1))}</a>`).join(" · ") : "";
+    const m = w ? w.mentions : null;
+    const said = m ? [["EB-3", m.eb3], ["H-2A", m.h2a], ["H-2B", m.h2b], ["PERM", m.perm]].filter(([, n]) => n).map(([k]) => k).join(", ") : "";
+    return `<h3>In their words</h3>${w && (w.description || w.about) ? `<p>${esc(w.description || w.about)}</p>` : ""}
+      ${w && w.about && w.description && w.about !== w.description ? `<p class="quote">${esc(w.about)}</p>` : ""}
+      ${g && g.summary ? `<p><span class="src">Google:</span> ${esc(g.summary)}</p>` : ""}
+      ${w ? `<dl class="kv">${said ? `<dt>Website covers</dt><dd>${esc(said)}</dd>` : ""}
+        ${w.languages.length ? `<dt>Languages</dt><dd>${esc(w.languages.join(", "))}</dd>` : ""}
+        ${w.countries.length ? `<dt>Countries named</dt><dd>${esc(w.countries.join(", "))}</dd>` : ""}
+        ${w.founded ? `<dt>Founded</dt><dd>${esc(w.founded)}</dd>` : ""}
+        ${w.emails.length ? `<dt>Site emails</dt><dd>${w.emails.map(lineHtml).join("")}</dd>` : ""}
+        ${w.phones.length ? `<dt>Site phones</dt><dd>${w.phones.map(lineHtml).join("")}</dd>` : ""}
+        ${soc ? `<dt>Social</dt><dd>${soc}</dd>` : ""}</dl>` : ""}`;
+  }
   function firmDetail(f, o) {
     const pairs = (xs) => xs.map(([k, n]) => `${esc(k)} (${fmt(n)})`).join(" · ");
-    return `<div class="detail"><div><h3>About</h3><p>${esc(f.summary)}</p>
+    return `<div class="detail"><div><h3>About</h3><p>${esc(f.summary)}</p>${siteHtml(f)}
+      <h3>EB-3 cases per year</h3>${trendHtml(f)}
       <h3>EB-3 roles filed</h3><p>${pairs(f.roles)}</p>
       <h3>Client industries</h3><p>${pairs(f.industries)}</p>
       ${f.sampleClients.length ? `<h3>Largest EB-3 clients</h3><p>${f.sampleClients.map(esc).join(" · ")}</p>` : ""}${noteHtml("firms", f, o)}</div>
@@ -283,6 +327,9 @@ footer { color: var(--muted); font-size: .78rem; max-width: 90ch }
         <dt>Representative</dt><dd>${esc(f.type)}</dd>
         <dt>EB-3 cases</dt><dd>${fmt(f.eb3)} filed · ${fmt(f.eb3Cert)} certified · ${fmt(f.eb3Denied)} denied</dd>
         <dt>All PERM cases</dt><dd>${fmt(f.totalPerm)}</dd>
+        ${f.medianWage ? `<dt>Typical EB-3 wage</dt><dd>$${fmt(f.medianWage)} a year (median offered)</dd>` : ""}
+        ${f.h2a ? `<dt>H-2A work</dt><dd>${fmt(f.h2a.cases)} cases · ${fmt(f.h2a.workers)} workers · ${fmt(f.h2a.employers)} farms (FY2025–26)</dd>` : ""}
+        <dt>Attorneys</dt><dd>${fmt(f.attorneyCount)} on EB-3 filings</dd>
         ${f.clientStates.length ? `<dt>Worksite states</dt><dd>${esc(f.clientStates.join(", "))}</dd>` : ""}
         ${f.agClients ? `<dt>Farm clients</dt><dd>${fmt(f.agClients)} employers · ${fmt(f.agCases)} cases</dd>` : ""}
         <dt>Last filing</dt><dd>${esc(f.lastFiling)}</dd>${googleKv(f)}</dl></div></div>`;
@@ -394,7 +441,7 @@ footer { color: var(--muted); font-size: .78rem; max-width: 90ch }
   });
   for (const s of ["#q", "#m-q"]) { let tm; $(s).addEventListener("input", () => { clearTimeout(tm); tm = setTimeout(apply, 180); }); }
   ["#state", "#sector", "#tier", "#status", "#sort", "#hasEmail", "#hasWeb", "#hrOnly", "#yrOnly",
-   "#m-state", "#m-focus", "#m-type", "#m-status", "#m-sort", "#m-hasWeb", "#m-big"].forEach((s) => $(s).addEventListener("change", apply));
+   "#m-state", "#m-focus", "#m-type", "#m-status", "#m-sort", "#m-hasWeb", "#m-big", "#m-siteEb3", "#m-h2a", "#m-lang"].forEach((s) => $(s).addEventListener("change", apply));
   window.addEventListener("hashchange", () => show(location.hash.slice(1)));
 
   async function connect() {
@@ -431,8 +478,10 @@ footer { color: var(--muted); font-size: .78rem; max-width: 90ch }
       const secs = Object.entries(V.farms.data.reduce((m, f) => ((m[f.sector] = (m[f.sector] || 0) + 1), m), {})).filter(([s]) => s).sort((a, b) => b[1] - a[1]);
       fillSelect("#sector", secs.map(([s, n]) => [s, `${s} (${n})`]));
     }),
-    load("firms", (f) => ({ ...f, _text: [f.name, f.city, f.state, ...f.sampleClients, ...f.roles.map((r) => r[0]), ...f.industries.map((r) => r[0]), ...f.attorneys.flatMap((a) => [a.name, a.email])].join(" ").toLowerCase() })).then(() => {
+    load("firms", (f) => ({ ...f, _text: [f.name, f.city, f.state, ...f.sampleClients, ...f.roles.map((r) => r[0]), ...f.industries.map((r) => r[0]), ...f.attorneys.flatMap((a) => [a.name, a.email]), ...(f.site ? [f.site.description, f.site.about, ...f.site.languages, ...f.site.countries] : [])].join(" ").toLowerCase() })).then(() => {
       fillSelect("#m-state", [...new Set(V.firms.data.map((f) => f.state).filter(Boolean))].sort().map((s) => [s, s]));
+      const langs = V.firms.data.reduce((m, f) => { (f.site ? f.site.languages : []).forEach((l) => (m[l] = (m[l] || 0) + 1)); return m; }, {});
+      fillSelect("#m-lang", Object.entries(langs).sort((a, b) => b[1] - a[1]).map(([l, n]) => [l, `${l} (${n})`]));
     }),
   ]).then(() => { show(location.hash.slice(1)); connect(); })
     .catch((e) => { $("#list").innerHTML = `<div class="empty">The lists didn't load (${esc(e.message)}). Reload the page to try again.</div>`; });

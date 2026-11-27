@@ -18,7 +18,13 @@ I = os.path.join(ROOT, "data", "interim")
 COLS = ["CASE_NUMBER", "CASE_STATUS", "DECISION_DATE", "EMP_BUSINESS_NAME", "EMP_NAICS", "EMP_STATE",
     "ATTY_AG_REP_TYPE", "ATTY_AG_LAST_NAME", "ATTY_AG_FIRST_NAME", "ATTY_AG_ADDRESS1", "ATTY_AG_CITY", "ATTY_AG_STATE",
     "ATTY_AG_POSTAL_CODE", "ATTY_AG_PHONE", "ATTY_AG_EMAIL", "ATTY_AG_LAW_FIRM_NAME", "PWD_SOC_CODE", "PWD_SOC_TITLE",
-    "JOB_TITLE", "PRIMARY_WORKSITE_STATE"]
+    "JOB_TITLE", "PRIMARY_WORKSITE_STATE", "JOB_OPP_WAGE_FROM", "JOB_OPP_WAGE_PER", "ATTY_AG_STATE_BAR_NUMBER",
+    "ATTY_AG_GOOD_STANDING_STATE"]
+H2A_COLS = ["CASE_NUMBER", "CASE_STATUS", "EMPLOYER_NAME", "TYPE_OF_REPRESENTATION", "ATTORNEY_AGENT_LAST_NAME",
+    "ATTORNEY_AGENT_FIRST_NAME", "ATTORNEY_AGENT_STATE", "LAWFIRM_NAME_BUSINESS_NAME", "TOTAL_WORKERS_H2A_CERTIFIED",
+    "ATTORNEY_AGENT_EMAIL"]
+EMAIL_OK = re.compile(r"^[\w.+-]+@[\w-]+(\.[\w-]+)*\.[a-z]{2,}$")
+PER_YEAR = {"hour": 2080, "week": 52, "bi-weekly": 26, "month": 12, "year": 1}
 WORKER_SOC = ("31", "33", "35", "37", "39", "41", "43", "45", "47", "49", "51", "53")
 SOC_GROUP = {"31": "Healthcare support", "33": "Protective service", "35": "Food prep & serving", "37": "Cleaning & grounds",
     "39": "Personal care", "41": "Sales", "43": "Office support", "45": "Farming", "47": "Construction",
@@ -38,7 +44,7 @@ FIRM_STOP = r"\b(THE|LAW|LAWS|OFFICES?|OF|FIRM|GROUP|PLLC|PLC|LLC|LLP|LTD|PC|P C
 
 
 def load():
-    cache = os.path.join(I, "perm_all.parquet")
+    cache = os.path.join(I, "perm_all_v2.parquet")
     if os.path.exists(cache):
         return pd.read_parquet(cache)
     frames = []
@@ -52,13 +58,49 @@ def load():
     return df
 
 
-def firm_key(r):
-    f = re.sub(r"[^A-Z0-9 ]", " ", r.ATTY_AG_LAW_FIRM_NAME.upper())
+def make_key(firm, first, last, state):
+    f = re.sub(r"[^A-Z0-9 ]", " ", str(firm).upper())
     f = re.sub(r"\s+", " ", re.sub(FIRM_STOP, " ", f)).strip()
     if f:
         return f
-    who = f"{r.ATTY_AG_FIRST_NAME} {r.ATTY_AG_LAST_NAME}".strip().upper()
-    return f"ATTY {who} {r.ATTY_AG_STATE}" if who else ""
+    who = f"{first} {last}".strip().upper()
+    return f"ATTY {who} {str(state).upper().strip()}" if who else ""
+
+
+def firm_key(r):
+    return make_key(r.ATTY_AG_LAW_FIRM_NAME, r.ATTY_AG_FIRST_NAME, r.ATTY_AG_LAST_NAME, r.ATTY_AG_STATE)
+
+
+def load_h2a():
+    """H-2A filings per representative: cases, workers certified, employers (FY2025-26)."""
+    cache = os.path.join(I, "h2a_reps_v2.parquet")
+    if not os.path.exists(cache):
+        frames = [read(f, H2A_COLS) for f in sorted(glob.glob(os.path.join(RAW, "H-2A_Disclosure_Data*.xlsx")))]
+        pd.concat(frames, ignore_index=True).fillna("").to_parquet(cache, index=False)
+    h = pd.read_parquet(cache)
+    h = h[(h.ATTORNEY_AGENT_LAST_NAME.str.strip() != "") & ~h.CASE_STATUS.str.contains("Withdrawn|Denied")]
+    h["key"] = [make_key(*t) for t in zip(h.LAWFIRM_NAME_BUSINESS_NAME, h.ATTORNEY_AGENT_FIRST_NAME, h.ATTORNEY_AGENT_LAST_NAME, h.ATTORNEY_AGENT_STATE)]
+    h["workers"] = pd.to_numeric(h.TOTAL_WORKERS_H2A_CERTIFIED, errors="coerce").fillna(0)
+    h["dom"] = h.ATTORNEY_AGENT_EMAIL.map(domain)
+    h.loc[h.dom.isin(FREEMAIL), "dom"] = ""
+    out = {}
+    for col in ("key", "dom"):  # match by firm name, or by the agent's email domain (same firm, different entity name)
+        agg = h[h[col] != ""].groupby(col).agg(cases=("CASE_NUMBER", "nunique"), workers=("workers", "sum"), employers=("EMPLOYER_NAME", "nunique"))
+        out[col] = {k: {"cases": int(r.cases), "workers": int(r.workers), "employers": int(r.employers)} for k, r in agg.iterrows()}
+    return out
+
+
+def annual(wage, per):
+    try:
+        w = float(str(wage).replace(",", "").replace("$", ""))
+    except ValueError:
+        return None
+    m = PER_YEAR.get(str(per).strip().lower())
+    return w * m if m and 10_000 <= w * m <= 400_000 else None
+
+
+def fiscal_year(d):
+    return f"FY{d.year + 1 if d.month >= 10 else d.year}" if pd.notna(d) else ""
 
 
 def sector(naics):
@@ -87,6 +129,7 @@ def main():
     df = df[df.key != ""]
     print(f"PERM cases with a representative: {len(df):,} | EB-3 worker-role cases: {int(df.worker.sum()):,}", file=sys.stderr)
     totals = df.groupby("key").size()
+    h2a = load_h2a()
     w = df[df.worker]
     out = []
     for key, g in w.groupby("key"):
@@ -100,8 +143,12 @@ def main():
         people = []
         for (first, last), pg in g.groupby([g.ATTY_AG_FIRST_NAME.str.strip().str.upper(), g.ATTY_AG_LAST_NAME.str.strip().str.upper()]):
             em = pg.ATTY_AG_EMAIL.str.strip().str.lower()
+            bar_no = pg.ATTY_AG_STATE_BAR_NUMBER.str.strip()
+            bar_st = pg.ATTY_AG_GOOD_STANDING_STATE.str.strip()
             people.append({"name": nice(f"{first} {last}"), "email": em[em != ""].value_counts().index[0] if (em != "").any() else "",
-                           "phone": phone(pg.ATTY_AG_PHONE.value_counts().index[0]), "cases": len(pg)})
+                           "phone": phone(pg.ATTY_AG_PHONE.value_counts().index[0]), "cases": len(pg),
+                           "bar": " ".join(x for x in [bar_st[bar_st != ""].value_counts().index[0] if (bar_st != "").any() else "",
+                                   ("#" + re.sub(r"\.0$", "", bar_no[bar_no != ""].value_counts().index[0])) if (bar_no != "").any() else ""] if x)})
         people.sort(key=lambda p: -p["cases"])
         doms = Counter(domain(p["email"]) for p in people for _ in range(p["cases"]))
         web = next((d for d, _ in doms.most_common() if d and d not in FREEMAIL and not d.endswith((".gov", ".edu"))), "")
@@ -124,11 +171,18 @@ def main():
             "sampleClients": [nice(c) for c in clients.head(5).index], "attorneys": people[:5],
             "lastFiling": str(g.date.max().date()) if pd.notna(g.date.max()) else "", "score": round(score, 1)}
         rec["specialist"] = bool(n >= 20 and share >= 0.5)
+        yrs = g.date.map(fiscal_year).value_counts()
+        rec["byYear"] = {fy: int(yrs.get(fy, 0)) for fy in ("FY2024", "FY2025", "FY2026")}
+        wages = [x for x in (annual(a, b) for a, b in zip(g.JOB_OPP_WAGE_FROM, g.JOB_OPP_WAGE_PER)) if x]
+        rec["medianWage"] = int(pd.Series(wages).median()) if wages else None
+        rec["attorneyCount"] = len(people)
+        rec["h2a"] = h2a["key"].get(key) or (h2a["dom"].get(web) if web else None)
         top_inds = ", ".join(s for s, _ in rec["industries"][:3])
         rec["summary"] = (f"{rec['type']} representative based in {rec['city']}, {rec['state']}. Filed {n:,} EB-3 worker-level PERM cases "
             f"FY2024–26 ({share:.0%} of their {rec['totalPerm']:,} PERM filings) for {rec['clients']:,} employers, mainly in {top_inds}. "
             + (f"Approval rate {rec['approval']:.0%} ({cert:,} certified, {den:,} denied). " if rec["approval"] is not None else "")
-            + (f"Agriculture clients: {rec['agClients']} ({ag} cases)." if ag else ""))
+            + (f"Agriculture clients: {rec['agClients']} ({ag} cases). " if ag else "")
+            + (f"Also files H-2A seasonal farm visas: {rec['h2a']['cases']:,} cases, {rec['h2a']['workers']:,} workers for {rec['h2a']['employers']:,} farms (FY2025–26)." if rec.get("h2a") else ""))
         out.append(rec)
     out.sort(key=lambda r: -r["score"])
     # Google Places for firms without a website (python pipeline/enrich_places.py --input dashboard/firms.json
@@ -150,10 +204,26 @@ def main():
         r["google"] = None
         if p:
             r["google"] = {"name": p.get("displayName", {}).get("text", ""), "phone": p.get("nationalPhoneNumber", ""),
-                "rating": p.get("rating"), "userRatingCount": p.get("userRatingCount", 0), "maps": p.get("googleMapsUri", ""), "match": conf}
+                "rating": p.get("rating"), "userRatingCount": p.get("userRatingCount", 0), "maps": p.get("googleMapsUri", ""), "match": conf,
+                "summary": (p.get("editorialSummary") or {}).get("text", "")}
             if not r["website"] and p.get("websiteUri"):
                 r["website"] = re.sub(r"[?#].*$", "", p["websiteUri"]).rstrip("/").replace("http://", "https://")
                 r["websiteSource"] = "Google Places"
+    # Facts from the firm's own website (python pipeline/scrape_firm_sites.py)
+    sites = {}
+    sp = os.path.join(I, "firm_sites.jsonl")
+    if os.path.exists(sp):
+        for line in open(sp):
+            try:
+                x = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if x.get("ok"):
+                x["emails"] = [e for e in x["emails"] if EMAIL_OK.match(e)]
+                sites[x["id"]] = {k: x[k] for k in ("title", "description", "about", "languages", "countries", "social",
+                                                    "emails", "phones", "founded", "mentions")}
+    for r in out:
+        r["site"] = sites.get(r["id"])
     with open(os.path.join(ROOT, "dashboard", "firms.json"), "w") as f:
         f.write("[\n" + ",\n".join(json.dumps(r, separators=(",", ":"), ensure_ascii=False, default=lambda o: o.item()) for r in out) + "\n]\n")
     os.makedirs(os.path.join(ROOT, "data", "out"), exist_ok=True)
@@ -167,7 +237,8 @@ def main():
             wr.writerow([r[c] for c in cols] + [a.get(k, "") for a in ats for k in ("name", "email", "phone", "cases")])
     print(f"{len(out):,} firms with >=5 EB-3 worker cases | specialists {sum(r['specialist'] for r in out):,} | "
           f"ag clients {sum(r['agClients'] > 0 for r in out):,} | with website {sum(bool(r['website']) for r in out):,} | "
-          f"with attorney email {sum(any(a['email'] for a in r['attorneys']) for r in out):,}")
+          f"with attorney email {sum(any(a['email'] for a in r['attorneys']) for r in out):,} | H-2A too {sum(bool(r['h2a']) for r in out):,} | "
+          f"site profile {sum(bool(r['site']) for r in out):,} | wage {sum(r['medianWage'] is not None for r in out):,}")
     for r in out[:8]:
         print(f"  {r['name'][:40]:40} {r['state']} eb3={r['eb3']:5} share={r['eb3Share']:.0%} appr={r['approval']} ag={r['agClients']} {r['website']}")
 
